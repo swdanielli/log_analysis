@@ -3,7 +3,7 @@
 analytics_util_dir = '/usr/users/swli/program/analytics_util'
 #import copy
 #import json
-#import os.path
+import os.path
 import re
 #import string
 #import subprocess
@@ -12,179 +12,23 @@ sys.path.append(analytics_util_dir)
 
 import analytics_util
 
-def load_courseware(courseware_raw_fname, courseware_corpus_dir, courseware_pos_dir, id_mapping, stopwords, is_stemming, courseware_type, is_math, courseware_math_word_dir=None):
-  data_generator = my_util.load_raw_data(courseware_raw_fname)
-  l_id = ''
-
-  if courseware_type == 'slides':
-    key = 'id'
-  elif courseware_type == 'tx':
-    key = 'id'
-  elif courseware_type == 'trans':
-    key = 'link_1'
-    tx_key = 'link_2'
-
-  courseware_corpus_dir += '/%s' % courseware_type
-  courseware_pos_dir += '/%s' % courseware_type
-  if courseware_math_word_dir:
-    courseware_math_word_dir += '/%s' % courseware_type
-
-  if not os.path.exists(courseware_corpus_dir):
-    os.makedirs(courseware_corpus_dir)
-  if not os.path.exists(courseware_pos_dir):
-    os.makedirs(courseware_pos_dir)
-  if courseware_math_word_dir and not os.path.exists(courseware_math_word_dir):
-    os.makedirs(courseware_math_word_dir)
-
-  content = ''
-  pos_buffer = ''
-  vocabs = []
-  f_o = None
-  fpos_o = None
-  if courseware_math_word_dir:
-    math_buffer = ''
-    fmath_o = None
-
-  for data in data_generator:
-    if data[key] not in id_mapping:
-      print data
-      continue
-
-    if l_id != id_mapping[data[key]]['l_id']:
-      l_id = id_mapping[data[key]]['l_id']
-      if courseware_type in ['trans']:
-        count = 1
-      if f_o:
-        f_o.write(content.strip() + '\n')
-        f_o.close()
-        content = ''
-        fpos_o.write(pos_buffer.strip() + '\n')
-        fpos_o.close()
-        pos_buffer = ''
-        if courseware_math_word_dir:
-          fmath_o.write(math_buffer.strip() + '\n')
-          fmath_o.close()
-          math_buffer = ''
-      f_o = open(courseware_corpus_dir + '/' + l_id, 'w')
-      fpos_o = open(courseware_pos_dir + '/' + l_id, 'w')
-      if courseware_math_word_dir:
-        fmath_o = open(courseware_math_word_dir + '/' + l_id, 'w')
-
-    preprocess_result = my_util.preprocess_content(
-      data['content'].strip(),
-      stopwords,
-      is_math=is_math,
-      is_stemming=is_stemming,
-      is_return_pos=True,
-      is_return_math_words=(not is_math)
-    )
-    words = preprocess_result[0]
-    pos_tags = preprocess_result[1]
-
-    processed_line = ' '.join(words)
-    processed_line = re.sub('\s+', ' ', processed_line.strip())
-    processed_tags = ' '.join(pos_tags)
-    processed_tags = re.sub('\s+', ' ', processed_tags.strip())
-
-    if courseware_type in ['trans']:
-      doc_count = 'TRANS_%s_%d' % (l_id, count)
-      count += 1
-    elif courseware_type in ['slides']:
-      doc_count = 'SLIDES_%s_%d' % (l_id, id_mapping[data[key]]['page_idx'])
-    elif courseware_type in ['tx']:
-      doc_count = 'TX_%s'% id_mapping[data[key]]['page_idx'] 
-      
-    if processed_line:
-      content += '%s\t%s\n' % (processed_line, doc_count)
-      pos_buffer += '%s\t%s\n' % (processed_tags, doc_count)
-    else:
-      content += 'this_is_an_empty_line\t%s\n' % doc_count
-      pos_buffer += 'None\t%s\n' % doc_count
-
-    if courseware_math_word_dir:
-      math_words = preprocess_result[2]
-      vocabs += math_words
-      processed_math = re.sub('\s+', ' ', (' '.join(math_words)).strip())
-      math_buffer += '%s\t%s\n' % (processed_math, doc_count)
-
-  if f_o:
-    f_o.write(content.strip() + '\n')
-    f_o.close()
-    fpos_o.write(pos_buffer.strip() + '\n')
-    fpos_o.close()
-    if courseware_math_word_dir:
-      fmath_o.write(math_buffer.strip() + '\n')
-      fmath_o.close()
-
-  return vocabs
-
-def wget_wiki_page(term, corpus_dir, stopwords, loaded_entities, disambiguation_suffixes, is_stemming, wiki_doc_count, is_math):
-  f_pre_tokenized_name = 'file_pre_tokenized.temp'
-  if term not in loaded_entities:
-    loaded_entities.append(term.lower())
-  else:
-    return (wiki_doc_count, None)
-
-  try:
-    wiki_page = wikipedia.page(term)
-  except wikipedia.exceptions.DisambiguationError as e:
-    options = []
-    for disambiguation_suffix in disambiguation_suffixes:
-      for option in e.options:
-        if disambiguation_suffix in option:
-          options.append(option)
-
-    for option in options:
-      (wiki_doc_count, _) = wget_wiki_page(option, corpus_dir, stopwords, loaded_entities, disambiguation_suffixes, is_stemming, wiki_doc_count, is_math)
-
-    return (wiki_doc_count, None)
-  except wikipedia.exceptions.PageError:
-    return (wiki_doc_count, None)
-
-  f_temp = open(f_pre_tokenized_name, 'w')
-  f_temp.write(wiki_page.title.encode('utf-8') + '\n')
-
-  content = re.sub(r'\n===(.+)Edit ===\n', r'\n\1.\n', wiki_page.content + '\n')
-  content = re.sub(r'\n==(.+)Edit ==\n', r'\n\1.\n', content)
-  content = re.sub(r'\n===(.+)===\n', r'\n\1.\n', content)
-  content = re.sub(r'\n==(.+)==\n', r'\n\1.\n', content)
-  f_temp.write(content.encode('utf-8'))
-  f_temp.close()
-
-  f_o = open(corpus_dir + '/' + term, 'w')
-  content = ''
-  for line in my_util.tokenization(f_pre_tokenized_name).stdout.readlines():
-    if re.match('Read in \d+ sentences', line):
-      break
-    processed_line = ' '.join(
-      my_util.preprocess_content(
-        line.strip(),
-        stopwords,
-        is_math=is_math,
-        is_stemming=is_stemming
-      )
-    )
-    processed_line = re.sub('\s+', ' ', processed_line.strip())
-    if processed_line:
-      content += processed_line + '\n'
-
-  sentences = re.sub('\n+', '\n', content.strip()).split('\n')
-
-  for sentence in sentences:
-    f_o.write(sentence.strip() + '\tWIKI_DOC_COUNT_%d\n' % wiki_doc_count)
-    wiki_doc_count += 1
-  f_o.close()
-
-  return (wiki_doc_count, wiki_page)
-
 def parse_cond_sql(header, user):
   user_id = user[header.index('user_id')]
   group_id = re.match("xblock.partition_service.partition_(\d+)$", user[header.index('key')]).group(1)
   method_id = user[header.index('value')]
   return (user_id, group_id, method_id)
 
+def parse_common_sql(header, user, concerned_slots):
+  result = []
+  for slot in concerned_slots:
+    result.append(user[header.index(slot)])
+  return result
+
 def _main( ):
   database_condition = sys.argv[1]
+  database_grades = sys.argv[2]
+  user_list = sys.argv[3]
+  inactive_user_list = sys.argv[4]
   rec_split_test = ['no_rec', 'rec']
   dis_split_test = ['no_dis', 'dis']
   split_test_id = ['604188856', '545632689']
@@ -193,6 +37,7 @@ def _main( ):
     split_test_id[1]: {'1306630916': rec_split_test[1], '638756241': rec_split_test[0]}
   }
   split_users = {}
+  grades = {}
 
   group = [None, None]
   for (header, user) in analytics_util.load_csv_like(database_condition, '\t'):
@@ -205,6 +50,26 @@ def _main( ):
         split_users[method] = []
       split_users[method].append(user_id)
       group = [None, None]
+
+  for (header, user) in analytics_util.load_csv_like(database_grades, '\t'):
+    result = parse_common_sql(header, user, ['user_id', 'grade'])
+    grades[result[0]] = result[1]
+
+  for (split_test, user_ids) in split_users.iteritems():
+    if not os.path.exists(split_test):
+      os.makedirs(split_test)
+    f_o = open('%s/%s' % (split_test, user_list), 'w')
+    f_o_inactive = open('%s/%s' % (split_test, inactive_user_list), 'w')
+    accumulate_grades = []
+
+    for user_id in user_ids:
+      if user_id in grades:
+        if float(grades[user_id]) > 0.0:
+          accumulate_grades.append(float(grades[user_id]))
+          f_o.write('%s\t%s\n' % (user_id, grades[user_id]))
+        else:
+          f_o_inactive.write('%s\t%s\n' % (user_id, grades[user_id]))
+    print 'Groups: %s\tSize: %d\tAverage grades: %f\n' % (split_test, len(accumulate_grades), sum(accumulate_grades)/len(accumulate_grades))
 
   '''
   # Choose preprocessing method
