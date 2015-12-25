@@ -27,7 +27,7 @@ def _main( ):
   user_list = sys.argv[3]
   user_event_dir = sys.argv[4]
 
-  user_per_batch = 500
+  user_per_batch = 10000
   start_date = datetime.date(2015, 7, 14)
   end_date = datetime.date(2015, 12, 22)
   all_users = analytics_util.load_users(user_list)
