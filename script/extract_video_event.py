@@ -4,6 +4,7 @@ analytics_util_dir = '/usr/users/swli/program/analytics_util'
 #import copy
 import datetime
 import gzip
+import itertools
 import json
 import math
 import os.path

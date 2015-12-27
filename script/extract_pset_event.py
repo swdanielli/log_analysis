@@ -82,6 +82,12 @@ def check_pset(event):
 def is_pset_event(event_type):
   return not ('video' in event_type or 'forum' in event_type or 'mit.recommender' in event_type)
 
+def cal_score(correct_map):
+  score = 0.0
+  for grade_result in correct_map.values():
+    score += (grade_result['npoints'] if grade_result['npoints'] else 0.0)
+  return score
+
 def _main( ):
   user_list = sys.argv[1]
   user_event_dir = sys.argv[2]
@@ -91,7 +97,6 @@ def _main( ):
 
   for single_date in ['accumulation']:
     for user in users:
-      f_o = open('%s/%s-%s' % (pset_event_analysis_dir, single_date, user), 'w')
       event_filename = '%s/%d/%s' % (user_event_dir, user, single_date)
       if not os.path.isfile(event_filename):
         continue
@@ -115,6 +120,17 @@ def _main( ):
         'pset_time': 0.0,
         'recommender_time': 0.0
       }
+      '''
+        submission_history
+          pset_id: {
+            problem_id: {
+              'max_grade': ?
+              'scores': []
+            },
+            ...
+          }
+      '''
+      submission_history = {}
       temp_statistics = {}
       prev_action_time = {}
       prev_pset_action_time = None
@@ -135,20 +151,37 @@ def _main( ):
             pset_index = event_pset_index
             if psets[pset_index] not in pset_statistics:
               pset_statistics[psets[pset_index]] = []
+              submission_history[psets[pset_index]] = {}
               temp_statistics[psets[pset_index]] = copy.deepcopy(statistics)
           else:
-            if isinstance(event['event'], basestring) and re.match('.*You have used \d+ of \d+ submission', event['event']): # submission
+            if event_type == 'problem_check' and event['event_source'] == 'server': # submission
               if prev_pset_action_time:
                 temp_statistics[psets[pset_index]]['pset_time'] += analytics_util.time_diff(prev_pset_action_time, event['time'])
               else:
                 temp_statistics[psets[pset_index]]['pset_time'] += max_pset_session
               pset_statistics[psets[pset_index]].append(copy.deepcopy(temp_statistics[psets[pset_index]]))
               temp_statistics[psets[pset_index]] = copy.deepcopy(statistics)
+              try:
+                event_info = event['event']
+                problem_id = event_info['problem_id']
+                if problem_id not in submission_history[psets[pset_index]]:
+                  submission_history[psets[pset_index]][problem_id] = {
+                    'max_grade': event_info['max_grade'],
+                    'scores': []
+                  }
+                #submission_history[psets[pset_index]][problem_id]['scores'].append(event_info['grade'])
+                submission_history[psets[pset_index]][problem_id]['scores'].append(cal_score(event_info['correct_map']))
+              except KeyError:
+                print event
+                raise KeyError
             else:
               increment_time_diff_by_materials(prev_action_time, event['time'], temp_statistics, psets[pset_index], 'pset_time')
               if 'page_close' in event_type:
                 prev_action_time = {}
                 continue
+#           except TypeError:
+#            print event
+#            raise TypeError
 
           prev_action_time = {'pset_time': event['time']}
           in_pset_session = True
@@ -178,9 +211,14 @@ def _main( ):
       for pset_id, stat in temp_statistics.iteritems():
         pset_statistics[pset_id].append(copy.deepcopy(stat))
 
-      json_data = json.dumps(pset_statistics, sort_keys=True, indent=2)
-      f_o.write(json_data)
-      f_o.close()
+      analytics_util.dump_data_json(
+        '%s/%s-%s' % (pset_event_analysis_dir, single_date, user),
+        pset_statistics
+      )
+      analytics_util.dump_data_json(
+        '%s/%s-%s' % (pset_event_analysis_dir, 'submission_hist', user),
+        submission_history
+      )
 
 if __name__ == '__main__':
   _main( )
