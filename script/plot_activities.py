@@ -34,10 +34,7 @@ psets = [
 ]
 
 def is_active(logs, submission_type, material='pset_time'):
-  if submission_type in ['all']:
-    return len(logs) > 0 and logs[0][material] > 0
-  else:
-    return len(logs) > 1 and logs[0][material] > 0
+  return bool(get_submission_idx(len(logs), submission_type)) and logs[0][material] > 0
 
 def print_line(vec):
   print ' '.join(map(lambda x: x.rjust(16), vec))
@@ -60,10 +57,12 @@ def print_stat(group, sum_logs, count_submissions, count_logs, active_learners=N
   print_line(arr)
 
 '''
-  submission_type=
+  submission_type =
     'all': all learners with active time > 0
     'all_sub': all learners with submissions (accumulate all submissions)
-    'first': statistices in first submissions
+    'first': statistics in first attempt (to first submission or end of course)
+    'first_sub': statistics to first submission
+    'other_sub': statistics between second and last submission
 '''
 def get_submission_idx(n_submissions, submission_type):
   if submission_type in ['all']:
@@ -72,6 +71,10 @@ def get_submission_idx(n_submissions, submission_type):
     return range(n_submissions-1)
   elif submission_type in ['first']:
     return [0]
+  elif submission_type in ['first_sub']:
+    return [0] if n_submissions > 1 else None
+  elif submission_type in ['other_sub']:
+    return range(1, n_submissions-1)
 
 def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
   sum_logs = np.zeros((len(groups), len(materials)))
@@ -141,8 +144,8 @@ def _main( ):
         continue
       user_pset_logs[group][username] = json.load(open(log_filename))
 
-  for submission_type in ['all_sub', 'all']:
-    print submission_type
+  for submission_type in ['all_sub', 'first_sub', 'other_sub', 'all', 'first']:
+    print '\n========== %s ==========\n' % submission_type.upper()
     for pset_idx, logs in enumerate(compute_accumulated_activities(user_pset_logs, submission_type)):
       if not any(logs.values()):
         continue

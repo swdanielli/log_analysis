@@ -71,13 +71,16 @@ def filter_events(event_type):
   return True
 
 def check_pset(event):
-  try:
-    for pset_index in range(len(psets)):
-      if psets[pset_index] in event['referer'] or psets[pset_index] in event['page']:
-        return pset_index
-  except TypeError:
-    return -1
+  for pset_index in range(len(psets)):
+    if check_page(event, psets[pset_index]):
+      return pset_index
   return -1
+
+def check_page(event, check_string):
+  try:
+    return True if (check_string in event['referer'] or check_string in event['page']) else False
+  except TypeError:
+    return False
 
 def is_pset_event(event_type):
   return not ('video' in event_type or 'forum' in event_type or 'mit.recommender' in event_type)
@@ -154,34 +157,38 @@ def _main( ):
               submission_history[psets[pset_index]] = {}
               temp_statistics[psets[pset_index]] = copy.deepcopy(statistics)
           else:
-            if event_type == 'problem_check' and event['event_source'] == 'server': # submission
+            if event_type in ['problem_check_fail', 'problem_check', 'problem_graded', 'problem_save', 'problem_show', 'save_problem_fail', 'save_problem_success', 'showanswer']: # submission attempt
               if prev_pset_action_time:
                 temp_statistics[psets[pset_index]]['pset_time'] += analytics_util.time_diff(prev_pset_action_time, event['time'])
               else:
                 temp_statistics[psets[pset_index]]['pset_time'] += max_pset_session
-              pset_statistics[psets[pset_index]].append(copy.deepcopy(temp_statistics[psets[pset_index]]))
-              temp_statistics[psets[pset_index]] = copy.deepcopy(statistics)
-              try:
-                event_info = event['event']
-                problem_id = event_info['problem_id']
-                if problem_id not in submission_history[psets[pset_index]]:
-                  submission_history[psets[pset_index]][problem_id] = {
-                    'max_grade': event_info['max_grade'],
-                    'scores': []
-                  }
-                #submission_history[psets[pset_index]][problem_id]['scores'].append(event_info['grade'])
-                submission_history[psets[pset_index]][problem_id]['scores'].append(cal_score(event_info['correct_map']))
-              except KeyError:
-                print event
-                raise KeyError
-            else:
+
+              if event_type == 'problem_graded' and event['event'][1]:
+                submission = re.search('You have used (\d+) of \d+ submission', event['event'][1])
+                if submission:
+                  while len(pset_statistics[psets[pset_index]]) < int(submission.group(1)):
+                    pset_statistics[psets[pset_index]].append(copy.deepcopy(statistics))
+                  for key, value in temp_statistics[psets[pset_index]].iteritems():
+                    pset_statistics[psets[pset_index]][int(submission.group(1))-1][key] += value
+                  temp_statistics[psets[pset_index]] = copy.deepcopy(statistics)
+              elif event_type == 'problem_check' and event['event_source'] == 'server': # submission
+                try:
+                  event_info = event['event']
+                  problem_id = event_info['problem_id']
+                  if problem_id not in submission_history[psets[pset_index]]:
+                    submission_history[psets[pset_index]][problem_id] = {
+                      'max_grade': event_info['max_grade'],
+                      'scores': []
+                    }
+                  submission_history[psets[pset_index]][problem_id]['scores'].append(cal_score(event_info['correct_map']))
+                except KeyError:
+                  print event
+                  raise KeyError
+            else: # navigation
               increment_time_diff_by_materials(prev_action_time, event['time'], temp_statistics, psets[pset_index], 'pset_time')
               if 'page_close' in event_type:
                 prev_action_time = {}
                 continue
-#           except TypeError:
-#            print event
-#            raise TypeError
 
           prev_action_time = {'pset_time': event['time']}
           in_pset_session = True
@@ -192,15 +199,15 @@ def _main( ):
             in_pset_session = False
             prev_action_time = {}
             prev_pset_action_time = None
-          elif 'page_close' in event_type or 'seq_' in event_type:
-            increment_time_diff_by_materials(prev_action_time, event['time'], temp_statistics, psets[pset_index])
+          # only video and pset have page_close and seq_*
+          elif (('video' in event_type) or
+            (('page_close' in event_type or 'seq_' in event_type) and check_page(event, 'video'))
+          ):
+            increment_time_diff_by_materials(prev_action_time, event['time'], temp_statistics, psets[pset_index], 'video_time')
             if 'page_close' in event_type:
               prev_action_time = {}
             elif prev_action_time:
-              prev_action_time = {prev_action_time.keys()[0]: event['time']}
-          elif 'video' in event_type:
-            increment_time_diff_by_materials(prev_action_time, event['time'], temp_statistics, psets[pset_index], 'video_time')
-            prev_action_time = {'video_time': event['time']}
+              prev_action_time = {'video_time': event['time']}
           elif 'forum' in event_type:
             increment_time_diff_by_materials(prev_action_time, event['time'], temp_statistics, psets[pset_index], 'forum_time')
             prev_action_time = {'forum_time': event['time']}
