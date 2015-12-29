@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+import pylab
 import os.path
 import re
 import sys
@@ -32,38 +33,72 @@ psets = [
   'Week_6/Problem_Set_5',
   'Week_10/Problem_Set_6',
 ]
+sub_type_definition = {
+  'all': 'First access of pset to the day we grabbed data',
+  'all_sub': 'First access of pset to the last answer-submission event',
+  'first':  'First access of pset to the first answer-submission event or the day we grabbed data',
+  'first_sub': 'First access of pset to the first answer-submission event',
+  'other_sub': 'Second answer-submission event to the last answer-submission event'
+}
+psets_pretty = [
+  'Problem_Set_0',
+  'Problem_Set_1',
+  'Problem_Set_2',
+  'Problem_Set_3',
+  'Problem_Set_4',
+  'Problem_Set_5',
+  'Problem_Set_6',
+  'Problem_Set_7',
+]
 
+def errorplot(xdata, ydata, bins=None, overlay=True):
+  '''
+  Takes data in the same format as a histogram. Plots it with
+  10 bins+errors superimposed
+  '''
+  if not bins:
+    bins = np.arange(10+1)*max(xdata)/10.0
+  else:
+    bins = np.array(bins)
+  points = [ [y for x,y in zip(xdata, ydata) if x < bins[i+1] and x >= bins[i]] for i in range(len(bins)-1)]
+ 
+  means = np.array(map(np.mean, points))
+  stddiv = np.array(map(np.std, points))
+  n = np.array(map(len,points))
+
+  pylab.errorbar((bins[:-1]+bins[1:])/2, means, yerr=stddiv/np.sqrt(n))
+ 
+  if overlay:
+    pylab.scatter(xdata, ydata, alpha=0.1)
+    
 def is_active(logs, submission_type, material='pset_time'):
   return bool(get_submission_idx(len(logs), submission_type)) and logs[0][material] > 0
 
 def print_line(vec):
-  print ' '.join(map(lambda x: x.rjust(16), vec))
+  print ' '.join(map(lambda x: x.rjust(24), vec))
 
 def print_before_stat(pset):
   print
-  print pset
-  print_line(['sec(#learners)', 'forum', 'pset', 'recom', 'video', 'sub_avg'])
+  print (psets_pretty[psets.index(pset)] if pset in psets else 'All')
+  print_line(['seconds[SE](#learners)', 'forum', 'pset', 'recom', 'video', '#submissions_avg [SE]'])
 
-def print_stat(group, sum_logs, count_submissions, count_logs, active_learners=None):
+def print_stat(group, sum_logs, count_submissions, active_learners=None):
   arr = [group]
-  for index, count_log in enumerate(count_logs):
-    arr += ['%.1f(%d)' % (
-      sum_logs[index]/count_log if count_log else 0.0,
-      int(count_log) if not active_learners else len(list(set(active_learners[index])))
-    )]
-  arr += ['%.1f' % (
-    count_submissions/count_logs[materials.index('pset_time')] if count_logs[materials.index('pset_time')] else 0.0
+  for index, sum_log in enumerate(sum_logs):
+    if 'no_rec' in group and materials.index('recommender_time') == index:
+      arr += ['---(---)']
+    else:
+      arr += ['%.1f[%.4f](%d)' % (
+        float(sum(sum_log))/len(sum_log) if sum_log else 0.0,
+        np.std(sum_log)/np.sqrt(len(sum_log)) if sum_log else 0.0,
+        len(sum_log) if not active_learners else len(list(set(active_learners[index])))
+      )]
+  arr += ['%.1f[%.4f]' % (
+    float(sum(count_submissions))/len(count_submissions) if count_submissions else 0.0,
+    np.std(count_submissions)/np.sqrt(len(count_submissions)) if count_submissions else 0.0
   )]
   print_line(arr)
 
-'''
-  submission_type =
-    'all': all learners with active time > 0
-    'all_sub': all learners with submissions (accumulate all submissions)
-    'first': statistics in first attempt (to first submission or end of course)
-    'first_sub': statistics to first submission
-    'other_sub': statistics between second and last submission
-'''
 def get_submission_idx(n_submissions, submission_type):
   if submission_type in ['all']:
     return range(n_submissions)
@@ -77,16 +112,20 @@ def get_submission_idx(n_submissions, submission_type):
     return range(1, n_submissions-1)
 
 def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
-  sum_logs = np.zeros((len(groups), len(materials)))
-  count_submissions = np.zeros(len(groups))
-  count_logs = np.zeros((len(groups), len(materials)))
+  #sum_logs = np.zeros((len(groups), len(materials)))
+  sum_logs = [[[] for _ in range(len(materials))] for _ in range(len(groups))]
+  count_submissions = [[] for _ in range(len(groups))]
+  #count_submissions = np.zeros(len(groups))
+  #count_logs = np.zeros((len(groups), len(materials)))
   active_learners = [[[] for _ in range(len(materials))] for _ in range(len(groups))]
   sum_time_by_user = copy.deepcopy(group_X_material_dict)
 
   for pset in psets:
-    sum_pset_logs = np.zeros((len(groups), len(materials)))
-    count_pset_submissions = np.zeros(len(groups))
-    count_pset_logs = np.zeros((len(groups), len(materials)))
+    #sum_pset_logs = np.zeros((len(groups), len(materials)))
+    sum_pset_logs = [[[] for _ in range(len(materials))] for _ in range(len(groups))]
+    #count_pset_submissions = np.zeros(len(groups))
+    count_pset_submissions = [[] for _ in range(len(groups))]
+    #count_pset_logs = np.zeros((len(groups), len(materials)))
     sum_pset_time_by_user = copy.deepcopy(group_X_material_dict)
 
     print_before_stat(pset)
@@ -95,8 +134,10 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
       for username, user_logs in user_pset_logs[group].iteritems():
         if pset in user_logs and is_active(user_logs[pset], submission_type):
           submissions = get_submission_idx(len(user_logs[pset]), submission_type)
-          count_submissions[group_idx] += len(submissions)
-          count_pset_submissions[group_idx] += len(submissions)
+          #count_submissions[group_idx] += len(submissions)
+          #count_pset_submissions[group_idx] += len(submissions)
+          count_submissions[group_idx].append(len(submissions))
+          count_pset_submissions[group_idx].append(len(submissions))
 
           for material_idx, material in enumerate(materials):
             sum_time = 0.0
@@ -105,10 +146,14 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
             # only learners active in a certain material should be counted
             # for the usage(time) of that material
             if sum_time:
+              '''
               sum_logs[group_idx][material_idx] += sum_time
               sum_pset_logs[group_idx][material_idx] += sum_time
               count_logs[group_idx][material_idx] += 1
               count_pset_logs[group_idx][material_idx] += 1
+              '''
+              sum_logs[group_idx][material_idx].append(sum_time)
+              sum_pset_logs[group_idx][material_idx].append(sum_time)
               active_learners[group_idx][material_idx].append(username)
 
             # all active users should be plotted
@@ -118,12 +163,14 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
             sum_time_by_user[condition][username] += sum_time
             sum_pset_time_by_user[condition][username] = sum_time
 
-      print_stat(group, sum_pset_logs[group_idx], count_pset_submissions[group_idx], count_pset_logs[group_idx])
+      print_stat(group, sum_pset_logs[group_idx], count_pset_submissions[group_idx])
+      #print_stat(group, sum_pset_logs[group_idx], count_pset_submissions[group_idx], count_pset_logs[group_idx])
     yield sum_pset_time_by_user
 
   print_before_stat('All')
   for group_idx, group in enumerate(groups):
-    print_stat(group, sum_logs[group_idx], count_submissions[group_idx], count_logs[group_idx], active_learners=active_learners[group_idx])
+    print_stat(group, sum_logs[group_idx], count_submissions[group_idx], active_learners=active_learners[group_idx])
+    #print_stat(group, sum_logs[group_idx], count_submissions[group_idx], count_logs[group_idx], active_learners=active_learners[group_idx])
 
   yield sum_time_by_user
 
@@ -145,7 +192,7 @@ def _main( ):
       user_pset_logs[group][username] = json.load(open(log_filename))
 
   for submission_type in ['all_sub', 'first_sub', 'other_sub', 'all', 'first']:
-    print '\n========== %s ==========\n' % submission_type.upper()
+    print '\n========== %s ==========\n' % sub_type_definition[submission_type]
     for pset_idx, logs in enumerate(compute_accumulated_activities(user_pset_logs, submission_type)):
       if not any(logs.values()):
         continue
@@ -154,23 +201,48 @@ def _main( ):
         fig = plt.figure()
         plt.clf()
         ax = fig.add_subplot(111)
+
+
+        (time, scores) = ([], [])
+        for group_idx, group in enumerate(groups):
+          for username, sum_time in logs['%s_%s' % (group, material)].iteritems():
+            time.append(sum_time)
+            scores.append(float(user_lists[group][username][0]))
+        #ax.scatter(time, scores, c=colors[group_idx], label=group)
+
+        pylab.xscale('log')
+        pylab.xlim((1, 1000000))
+
+        pylab.title('materials = %s, pset = %s, time span = %s' % (
+          re.sub('_time', '', material),
+          (re.sub('/', '_', psets_pretty[pset_idx]) if pset_idx < len(psets_pretty) else 'all'),
+          sub_type_definition[submission_type]
+        ))
+        pylab.xlabel("spent time (seconds)")
+        pylab.ylabel("scores")
+        errorplot(time, scores, bins=[1,10,100,1000,10000,100000,1000000])
+        '''
+        # plot by groups
         for group_idx, group in enumerate(groups):
           (time, scores) = ([], [])
           for username, sum_time in logs['%s_%s' % (group, material)].iteritems():
             time.append(sum_time)
             scores.append(float(user_lists[group][username][0]))
           ax.scatter(time, scores, c=colors[group_idx], label=group)
-        plt.legend()
-        plt.savefig(
+        '''
+        #ax.set_xscale('log')
+        #plt.xlim((1, 1000000))
+        #plt.legend()
+        pylab.savefig(
           '%s/%s-%s-%s.pdf' % (
             plot_dir,
-            re.sub('/', '_', psets[pset_idx]) if pset_idx < len(psets) else 'all',
+            re.sub('/', '_', psets_pretty[pset_idx]) if pset_idx < len(psets_pretty) else 'all',
             material,
-            submission_type
+            sub_type_definition[submission_type]
           ),
           format='pdf'
         )
-        plt.close()
+        #plt.close()
 
   '''
   for
