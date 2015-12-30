@@ -12,18 +12,6 @@ sys.path.append(analytics_util_dir)
 
 import analytics_util
 
-def parse_cond_sql(header, user):
-  user_id = user[header.index('user_id')]
-  group_id = re.match("xblock.partition_service.partition_(\d+)$", user[header.index('key')]).group(1)
-  method_id = user[header.index('value')]
-  return (user_id, group_id, method_id)
-
-def parse_common_sql(header, user, concerned_slots):
-  result = []
-  for slot in concerned_slots:
-    result.append(user[header.index(slot)])
-  return result
-
 def _main( ):
   database_condition = sys.argv[1]
   database_grades = sys.argv[2]
@@ -41,7 +29,7 @@ def _main( ):
 
   group = [None, None]
   for (header, user) in analytics_util.load_csv_like(database_condition, '\t'):
-    (user_id, group_id, method_id) = parse_cond_sql(header, user)
+    (user_id, group_id, method_id) = analytics_util.parse_cond_sql(header, user)
     group[split_test_id.index(group_id)] = conditions[group_id][method_id]
 
     if group[0] and group[1]:
@@ -52,7 +40,7 @@ def _main( ):
       group = [None, None]
 
   for (header, user) in analytics_util.load_csv_like(database_grades, '\t'):
-    result = parse_common_sql(header, user, ['user_id', 'grade'])
+    result = analytics_util.parse_common_sql(header, user, ['user_id', 'grade'])
     grades[result[0]] = result[1]
 
   for (split_test, user_ids) in split_users.iteritems():

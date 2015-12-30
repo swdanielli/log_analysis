@@ -158,7 +158,13 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
 
   yield sum_time_by_user
 
-def gen_stratification(iterable, tags, lambda=):
+def gen_stratification(user_profile, tags, user_cohorts, condition=lambda x: True):
+  for (header, user) in analytics_util.load_csv_like(user_profile, '\t'):
+    result = analytics_util.parse_common_sql(header, user, tags)
+    if condition(result[1]) and result[0] not in user_cohorts:
+      user_cohorts[result[0]] = 0
+    elif not condition(result[1]) and result[0] in user_cohorts:
+      user_cohorts[result[0]] += 1 # shift existing layer by one
 
 def _main( ):
   user_listname = sys.argv[1]
@@ -169,19 +175,21 @@ def _main( ):
   user_profile = sys.argv[5]
   if 'verified' in stratification:
     user_cohort_names = ['honor', 'verify']
-    for (header, user) in analytics_util.load_csv_like(user_profile, '\t'):
-      result = analytics_util.parse_common_sql(header, user, ['user_id', 'mode'])
-      user_cohorts[result[0]] = (0 if result[1] == 'honor' else 1)
+    for mode in ['verified', 'honor']: # in reverse order of user_cohort_names
+      gen_stratification(user_profile, ['user_id', 'mode'], user_cohorts, lambda x: x == mode)
   elif 'overall_scores_0.5' in stratification:
-    user_cohort_names = ['lt_0.5', 'gt_0.5']
-    for (header, user) in analytics_util.load_csv_like(user_profile, '\t'):
-      result = analytics_util.parse_common_sql(header, user, ['user_id', 'grade'])
-      user_cohorts[result[0]] = (0 if float(result[1]) == 'honor' else 1)
+    boundaries = [0.5]
+    user_cohort_names = []
+    for lower, upper in zip([0.0]+boundaries, boundaries+[1.01]):
+      user_cohort_names.insert(0, 'grade_%f_to_%f' % (lower, upper))
+      gen_stratification(user_profile, ['user_id', 'grade'], user_cohorts, lambda x: float(x) >= lower and float(x) < upper)
   else:
     user_cohort_names = ['all']
-    for (header, user) in analytics_util.load_csv_like(user_profile, '\t'):
-      result = analytics_util.parse_common_sql(header, user, ['user_id'])
-      user_cohorts[result[0]] = 0
+    gen_stratification(user_profile, ['user_id', 'mode'], user_cohorts)
+
+  if 'nonzero' in stratification:
+    user_cohort_names.insert(0, 'grade_is_zero')
+    gen_stratification(user_profile, ['user_id', 'grade'], user_cohorts, lambda x: float(x) == 0)
 
   for user_cohort_index, user_cohort_name in enumerate(user_cohort_names):
     print '\n********** %s learners **********\n' % user_cohort_name
