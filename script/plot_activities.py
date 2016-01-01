@@ -159,10 +159,11 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
 
       print_stat(group, sum_pset_logs[group_idx], count_pset_submissions[group_idx])
     for hyper_group in hyper_groups:
-      (logs, counts) = ([], [])
+      (logs, counts) = ([[] for _ in range(len(materials))], [])
       for index in hyper_group.values()[0]:
-        logs += sum_pset_logs[index]
         counts += count_pset_submissions[index]
+        for material_idx in range(len(materials)):
+          logs[material_idx] += sum_pset_logs[index][material_idx]
       print_stat(hyper_group.keys()[0], logs, counts)
 
     yield sum_pset_time_by_user
@@ -171,11 +172,12 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
   for group_idx, group in enumerate(groups):
     print_stat(group, sum_logs[group_idx], count_submissions[group_idx], active_learners=active_learners[group_idx])
   for hyper_group in hyper_groups:
-    (logs, counts, leaners) = ([], [], [])
+    (logs, counts, leaners) = ([[] for _ in range(len(materials))], [], [[] for _ in range(len(materials))])
     for index in hyper_group.values()[0]:
-      logs += sum_logs[index]
       counts += count_submissions[index]
-      leaners += active_learners[index]
+      for material_idx in range(len(materials)):
+        logs[material_idx] += sum_logs[index][material_idx]
+        leaners[material_idx] += active_learners[index][material_idx]
     print_stat(hyper_group.keys()[0], logs, counts, active_learners=leaners)
 
   yield sum_time_by_user
@@ -216,26 +218,19 @@ def _main( ):
     for lower, upper in zip([0.0]+boundaries, boundaries+[1.01]):
       user_cohort_names.insert(0, 'grade_%f_to_%f' % (lower, upper))
       gen_stratification(user_profile, ['user_id', 'grade'], user_cohorts, lambda x: float(x) >= lower and float(x) < upper)
-  elif 'video' in stratification:
+  elif 'video' in stratification or 'prac_pset' in stratification:
     active_users = []
     user_lists = []
     for group in groups:
       active_users += analytics_util.load_user_infos('%s/%s' % (group, user_listname)).keys()
     is_outliers = lambda x: False
 
-    if 'watch_time' in stratification:
-      mode = 'watch_time'
-    elif 'played_videos' in stratification:
-      mode = 'played_videos'
-    elif 'covered_video_time' in stratification:
-      mode = 'covered_video_time'
-    elif 'watch_2_cover' in stratification:
-      mode = 'watch_2_cover'
+    if 'watch_2_cover' in stratification:
       is_outliers = lambda x: x > 10
-    elif 'f_seek' in stratification:
-      mode = 'f_seek'
-    elif 'b_seek' in stratification:
-      mode = 'b_seek'
+    if 'video' in stratification:
+      mode = re.match('.*?video_(.*)_\d+-folds', stratification).group(1)
+    elif 'prac_pset' in stratification:
+      mode = re.match('.*?prac_pset_(.*)_\d+-folds', stratification).group(1)
 
     for (header, user) in analytics_util.load_csv_like(user_profile, '\t'):
       result = analytics_util.parse_common_sql(header, user, ['user_id', mode])
@@ -254,9 +249,9 @@ def _main( ):
       user_cohort_names.insert(0, '%s_%dth_to_%dth' % (mode, int(lower*100), int(upper*100)))
       gen_stratification_sorted_list(user_cohorts, user_lists, lambda x: x >= lower and x < upper)
 
-    if 'all_video' in stratification:
+    if 'all' in stratification:
       user_cohort_names = map(lambda x: x + ' in all lectures', user_cohort_names)
-    elif 'lecture_2_video' in stratification:
+    elif 'lecture_2' in stratification:
       user_cohort_names = map(lambda x: x + ' in lecture 2', user_cohort_names)
   else:
     user_cohort_names = ['all']
