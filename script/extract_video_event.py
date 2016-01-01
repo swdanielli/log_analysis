@@ -40,6 +40,12 @@ def _main( ):
   ]
   watch_time_cap = 2.0 * 60 * 60  # max watch time in one video: 2 hours
   users = analytics_util.load_users(user_list)
+  considered_ids = []
+
+  if len(sys.argv) > 4:
+    part_of_lecture = sys.argv[4]
+    if 'lecture_2' in part_of_lecture:
+      considered_ids.append('ed0d1659290e4afea1d3d13d1da22392')
 
   for single_date in itertools.chain(analytics_util.date_range_gen(start_date, end_date), ['accumulation']):
     f_o = open('%s/%s' % (video_event_analysis_dir, single_date), 'w')
@@ -62,7 +68,8 @@ def _main( ):
       events = analytics_util.load_time_sorted_event(
         event_filename,
         ['video', 'page_close', 'seq_'],
-        lambda x: 'event_type' not in x or 'event' not in x or x['event_type'] not in considered_events
+        lambda x: 'event_type' not in x or 'event' not in x or x['event_type'] not in considered_events,
+        must_have=considered_ids
       )
 
       for event in events:
