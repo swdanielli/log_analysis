@@ -15,6 +15,7 @@ import pylab
 import operator
 import os.path
 import re
+from scipy.stats import ttest_ind
 import sys
 sys.path.append(analytics_util_dir)
 
@@ -32,7 +33,7 @@ materials = ["forum_time", "pset_time", "recommender_time", "video_time"]
 group_X_material_dict = {('%s_%s' % (group, material)): {} for group, material in itertools.product(groups, materials)}
 colors = ['b', 'g', 'r', 'k', 'c', 'm', 'y']
 psets = [
-  'Week_1/Problem_Set_1',
+#  'Week_1/Problem_Set_1',
   'Week_2/Basic_Problem_Set_1',
   'Week_2/Problem_Set_2',
   'sp13_Week_3/sp13_Problem_Set_3',
@@ -49,7 +50,7 @@ sub_type_definition = {
   'other_sub': 'Second answer-submission event to the last answer-submission event'
 }
 psets_pretty = [
-  'Problem_Set_0',
+#  'Problem_Set_0',
   'Problem_Set_1',
   'Problem_Set_2',
   'Problem_Set_3',
@@ -80,7 +81,7 @@ def errorplot(xdata, ydata, bins=None, overlay=True):
     pylab.scatter(xdata, ydata, alpha=0.1)
     
 def is_active(logs, submission_type, material='pset_time'):
-  return bool(get_submission_idx(len(logs), submission_type)) and logs[0][material] > 0
+  return bool(get_submission_idx(len(logs), submission_type)) and logs[0][material] > 10
 
 def print_line(vec):
   print ' '.join(map(lambda x: x.rjust(24), vec))
@@ -96,7 +97,7 @@ def print_stat(group, sum_logs, count_submissions, active_learners=None):
     if 'no_rec' in group and materials.index('recommender_time') == index:
       arr += ['---(---)']
     else:
-      arr += ['%.1f[%.4f](%d)' % (
+      arr += ['%.4f[%.4f](%d)' % (
         float(sum(sum_log))/len(sum_log) if sum_log else 0.0,
         np.std(sum_log)/np.sqrt(len(sum_log)) if sum_log else 0.0,
         len(sum_log) if not active_learners else len(list(set(active_learners[index])))
@@ -119,24 +120,49 @@ def get_submission_idx(n_submissions, submission_type):
   elif submission_type in ['other_sub']:
     return range(1, n_submissions-1)
 
+def remove_outliers(sum_logs, count_submissions):
+  min_pset_time = 7 * 60 * 30 # spend at least 20 minutes
+  max_pset_time = 7 * 60 * 60 * 44 # spend at most 48 hours
+  for group_idx in range(len(groups)):
+    for username in sum_logs[group_idx].keys():
+      pset_time = sum_logs[group_idx][username][materials.index('pset_time')]
+      if pset_time > max_pset_time or pset_time < min_pset_time:
+        del sum_logs[group_idx][username]
+        del count_submissions[group_idx][username]
+
+def log_time(sum_logs):
+  for group_idx in range(len(groups)):
+    for username in sum_logs[group_idx].keys():
+      for material_idx in range(len(materials)):
+        time = sum_logs[group_idx][username][material_idx]
+        sum_logs[group_idx][username][material_idx] = math.log(time) if time else 0.0
+
 def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
-  sum_logs = [[[] for _ in range(len(materials))] for _ in range(len(groups))]
-  count_submissions = [[] for _ in range(len(groups))]
-  active_learners = [[[] for _ in range(len(materials))] for _ in range(len(groups))]
+#  sum_logs = [[{} for _ in range(len(materials))] for _ in range(len(groups))]
+  sum_logs = [{} for _ in range(len(groups))]
+  count_submissions = [{} for _ in range(len(groups))]
+  #active_learners = [[[] for _ in range(len(materials))] for _ in range(len(groups))]
   sum_time_by_user = copy.deepcopy(group_X_material_dict)
+
+  for group_idx, group in enumerate(groups):
+    for username in user_pset_logs[group].keys():
+      count_submissions[group_idx][username] = 0.0
+      sum_logs[group_idx][username] = [0.0 for _ in range(len(materials))]
 
   for pset in psets:
     sum_pset_logs = [[[] for _ in range(len(materials))] for _ in range(len(groups))]
     count_pset_submissions = [[] for _ in range(len(groups))]
     sum_pset_time_by_user = copy.deepcopy(group_X_material_dict)
 
-    print_before_stat(pset)
+#    print_before_stat(pset)
 
     for group_idx, group in enumerate(groups):
       for username, user_logs in user_pset_logs[group].iteritems():
         if pset in user_logs and is_active(user_logs[pset], submission_type):
           submissions = get_submission_idx(len(user_logs[pset]), submission_type)
-          count_submissions[group_idx].append(len(submissions))
+          if username in count_submissions[group_idx]:
+            count_submissions[group_idx][username] += len(submissions)
+          #count_submissions[group_idx].append(len(submissions))
           count_pset_submissions[group_idx].append(len(submissions))
 
           for material_idx, material in enumerate(materials):
@@ -146,9 +172,11 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
             # only learners active in a certain material should be counted
             # for the usage(time) of that material
             if sum_time:
-              sum_logs[group_idx][material_idx].append(sum_time)
+              if username in sum_logs[group_idx]:
+                sum_logs[group_idx][username][material_idx] += sum_time
+              #sum_logs[group_idx][material_idx].append(sum_time)
               sum_pset_logs[group_idx][material_idx].append(sum_time)
-              active_learners[group_idx][material_idx].append(username)
+              #active_learners[group_idx][material_idx].append(username)
 
             # all active users should be plotted
             condition = '%s_%s' % (group, material)
@@ -156,29 +184,48 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
               sum_time_by_user[condition][username] = 0.0
             sum_time_by_user[condition][username] += sum_time
             sum_pset_time_by_user[condition][username] = sum_time
-
-      print_stat(group, sum_pset_logs[group_idx], count_pset_submissions[group_idx])
-    for hyper_group in hyper_groups:
-      (logs, counts) = ([[] for _ in range(len(materials))], [])
-      for index in hyper_group.values()[0]:
-        counts += count_pset_submissions[index]
-        for material_idx in range(len(materials)):
-          logs[material_idx] += sum_pset_logs[index][material_idx]
-      print_stat(hyper_group.keys()[0], logs, counts)
+        else:
+          if username in count_submissions[group_idx]:
+            del count_submissions[group_idx][username]
+            del sum_logs[group_idx][username]
+#      print_stat(group, sum_pset_logs[group_idx], count_pset_submissions[group_idx])
+#    for hyper_group in hyper_groups:
+#      (logs, counts) = ([[] for _ in range(len(materials))], [])
+#      for index in hyper_group.values()[0]:
+#        counts += count_pset_submissions[index]
+#        for material_idx in range(len(materials)):
+#          logs[material_idx] += sum_pset_logs[index][material_idx]
+#      print_stat(hyper_group.keys()[0], logs, counts)
 
     yield sum_pset_time_by_user
 
+  remove_outliers(sum_logs, count_submissions)
+
+  log_time(sum_logs)
+
   print_before_stat('All')
   for group_idx, group in enumerate(groups):
-    print_stat(group, sum_logs[group_idx], count_submissions[group_idx], active_learners=active_learners[group_idx])
+#    print max(zip(*(sum_logs[index].values()))[1])
+#    print min(zip(*(sum_logs[index].values()))[1])
+
+    print_stat(group, zip(*(sum_logs[group_idx].values())), count_submissions[group_idx].values())
+    #print_stat(group, sum_logs[group_idx], count_submissions[group_idx], active_learners=active_learners[group_idx])
+
+  for group in ["dis_rec", "no_dis_rec"]:
+    t, p = ttest_ind(
+      zip(*(sum_logs[groups.index(group)].values()))[materials.index('pset_time')],
+      zip(*(sum_logs[groups.index("no_dis_no_rec")].values()))[materials.index('pset_time')],
+      equal_var=False
+    )
+    print "%s vs. no_dis_no_rec, ttest_ind: t = %g p = %g" % (group, t, p)
+
   for hyper_group in hyper_groups:
-    (logs, counts, leaners) = ([[] for _ in range(len(materials))], [], [[] for _ in range(len(materials))])
+    (logs, counts) = ([() for _ in range(len(materials))], [])
     for index in hyper_group.values()[0]:
-      counts += count_submissions[index]
+      counts += count_submissions[index].values()
       for material_idx in range(len(materials)):
-        logs[material_idx] += sum_logs[index][material_idx]
-        leaners[material_idx] += active_learners[index][material_idx]
-    print_stat(hyper_group.keys()[0], logs, counts, active_learners=leaners)
+        logs[material_idx] += zip(*(sum_logs[index].values()))[material_idx]
+    print_stat(hyper_group.keys()[0], logs, counts)
 
   yield sum_time_by_user
 
@@ -210,10 +257,10 @@ def _main( ):
     for mode in ['verified', 'honor']: # in reverse order of user_cohort_names
       gen_stratification(user_profile, ['user_id', 'mode'], user_cohorts, lambda x: x == mode)
   elif 'overall_scores' in stratification:
-    if '0.5_overall_scores' in stratification:
-      boundaries = [0.5]
-    elif '0.1_0.3_0.5_0.7_0.9_overall_scores' in stratification:
-      boundaries = [0.1, 0.3, 0.5, 0.7, 0.9]
+    if '0.6_overall_scores' in stratification:
+      boundaries = [0.6]
+    elif '0.2_0.4_0.6_0.8_overall_scores' in stratification:
+      boundaries = [0.2, 0.4, 0.6, 0.8]
     user_cohort_names = []
     for lower, upper in zip([0.0]+boundaries, boundaries+[1.01]):
       user_cohort_names.insert(0, 'grade_%f_to_%f' % (lower, upper))
@@ -286,6 +333,8 @@ def _main( ):
       for pset_idx, logs in enumerate(compute_accumulated_activities(user_pset_logs, submission_type)):
         if not any(logs.values()):
           continue
+
+        continue # TODO
 
         for material in materials:
           fig = plt.figure()
