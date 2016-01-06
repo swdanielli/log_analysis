@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+from permute.core import two_sample
 import pylab
 import operator
 import os.path
@@ -205,12 +206,10 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
 
   print_before_stat('All')
   for group_idx, group in enumerate(groups):
-#    print max(zip(*(sum_logs[index].values()))[1])
-#    print min(zip(*(sum_logs[index].values()))[1])
-
     print_stat(group, zip(*(sum_logs[group_idx].values())), count_submissions[group_idx].values())
-    #print_stat(group, sum_logs[group_idx], count_submissions[group_idx], active_learners=active_learners[group_idx])
 
+  '''
+  # two sample t test
   for group in ["dis_rec", "no_dis_rec"]:
     t, p = ttest_ind(
       zip(*(sum_logs[groups.index(group)].values()))[materials.index('pset_time')],
@@ -218,6 +217,20 @@ def compute_accumulated_activities(user_pset_logs, submission_type='all_sub'):
       equal_var=False
     )
     print "%s vs. no_dis_no_rec, ttest_ind: t = %g p = %g" % (group, t, p)
+  '''
+  # permutation test
+  for g1, g2 in zip(
+    ["dis_no_rec", "dis_no_rec", "dis_no_rec", "no_dis_no_rec", "no_dis_no_rec", "dis_rec"],
+    ["no_dis_no_rec", "dis_rec", "no_dis_rec", "dis_rec", "no_dis_rec", "no_dis_rec"]
+  ):
+    p, t = two_sample(
+      zip(*(sum_logs[groups.index(g1)].values()))[materials.index('pset_time')],
+      zip(*(sum_logs[groups.index(g2)].values()))[materials.index('pset_time')],
+      reps=100000,
+      stat='mean',
+      alternative='greater'
+    )
+    print "====== pset_time %s > %s, permutation test: p-value = %g ======" % (g1, g2, p)
 
   for hyper_group in hyper_groups:
     (logs, counts) = ([() for _ in range(len(materials))], [])
@@ -328,7 +341,8 @@ def _main( ):
           continue
         user_pset_logs[group][username] = json.load(open(log_filename))
 
-    for submission_type in ['all_sub', 'first_sub', 'other_sub', 'all', 'first']:
+#    for submission_type in ['all_sub', 'first_sub', 'other_sub', 'all', 'first']:
+    for submission_type in ['all_sub', 'first_sub', 'other_sub']:
       print '\n========== %s ==========\n' % sub_type_definition[submission_type]
       for pset_idx, logs in enumerate(compute_accumulated_activities(user_pset_logs, submission_type)):
         if not any(logs.values()):
